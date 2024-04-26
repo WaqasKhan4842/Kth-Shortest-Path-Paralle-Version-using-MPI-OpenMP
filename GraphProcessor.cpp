@@ -1,6 +1,6 @@
 #include "GraphProcessor.h"
 #include "Serial_KShortest.h" // Include any other necessary headers
-
+#include <mpi.h>
 using namespace std;
 
 GraphProcessor::GraphProcessor() : numEdges(0), numNodes(0) {}
@@ -30,10 +30,9 @@ void GraphProcessor::read_file_DoctorWho(int sub_choice)
 {
     // Initialize Graph
     int nodeCount = 0;
-    unordered_map<string, int> nodeIndices;
-    unordered_map<int, string> nodeNames;   // Map to store index -> node name
+
     string filename, line, source, target, weight, type;
-    int numEdges = 0;
+    numEdges = 0;
 
     if (sub_choice == 1)
         filename = "DataSets/classic-who.csv";
@@ -75,19 +74,13 @@ void GraphProcessor::read_file_DoctorWho(int sub_choice)
         ++numEdges;
     }
 
-    int numNodes = nodeIndices.size();
+    numNodes = nodeIndices.size();
     cout << "Number of nodes: " << numNodes << endl;
     cout << "Number of edges: " << numEdges << endl;
 
-    for(int i=0;i<5;i++)
+    for (int i = 0; i < 10; ++i)
     {
-    pair<int, int> randomEdge = chooseRandomEdge();
-    string randomSource = nodeNames[randomEdge.first];
-    string randomDest = nodeNames[randomEdge.second];
-
-    // Print the statement
-    cout << "K shortest paths from node " << randomSource << " to node " << randomDest << ":" << endl;
-    findKShortest(Graph, numEdges, numNodes, 4, randomEdge.first, randomEdge.second);
+        randomEdges.push_back(chooseRandomEdge());
     }
 }
 
@@ -105,7 +98,6 @@ void GraphProcessor::read_file_SNAP(int sub_choice)
         cerr << "Error opening file.\n";
         return;
     }
-
     int numEdgesFound = 0;
     string line;
     while (getline(file, line))
@@ -132,8 +124,72 @@ void GraphProcessor::read_file_SNAP(int sub_choice)
         w = 1;
         addEdgeToGlobalGraph(u, v, w);
     }
-    cout << "No of EDGES: " << numEdges << endl;
-    // printGraph();
-    pair<int, int> randomEdge = chooseRandomEdge();
-    findKShortest(Graph, numEdges, numNodes, 10, randomEdge.first, randomEdge.second);
+
+    // cout << "No of EDGES: " << numEdges << endl;
+    //  printGraph();
+    //  Vector to store random edges
+
+    // Generate 10 random edges
+    for (int i = 0; i < 10; ++i)
+    {
+        randomEdges.push_back(chooseRandomEdge());
+    }
+}
+void GraphProcessor::serial_execution(int dataset_type)
+{
+    if (dataset_type == 1)
+    {
+        for (int i = 0; i < 10; ++i)
+        {
+            findKShortest(Graph, numEdges, numNodes, 2, randomEdges[i].first, randomEdges[i].second, dataset_type, 1);
+        }
+    }
+    else
+    {
+        for (int i = 0; i < 10; ++i)
+        {
+            string randomSource = nodeNames[randomEdges[i].first];
+            string randomDest = nodeNames[randomEdges[i].second];
+
+            // Print the statement
+            cout << "K shortest paths from node " << randomSource << " to node " << randomDest << ":" << endl;
+            findKShortest(Graph, numEdges, numNodes, 2, randomEdges[i].first, randomEdges[i].second, dataset_type, 1);
+        }
+    }
+}
+void GraphProcessor::parallel_execution(int process_rank, int comm_size, int dataset_type)
+{
+    int num_edges_per_process = randomEdges.size() / comm_size;
+    int remainder = randomEdges.size() % comm_size;
+
+    // Calculate the number of elements each process will receive
+    int recv_count = (process_rank < remainder) ? (num_edges_per_process + 1) : num_edges_per_process;
+
+    // Allocate space to receive the portion of randomEdges for this process
+    std::vector<std::pair<int, int>> local_edges(recv_count);
+
+    // Scatter randomEdges to all processes
+    MPI_Scatter(randomEdges.data(), recv_count * 2, MPI_INT,
+                local_edges.data(), recv_count * 2, MPI_INT, 0, MPI_COMM_WORLD);
+    if (dataset_type == 1)
+    {
+        for (const auto &edge : local_edges)
+        {
+            findKShortest(Graph, numEdges, numNodes, 2, edge.first, edge.second, dataset_type, 2);
+        }
+    }
+    else
+    {
+
+        for (const auto &edge : local_edges)
+        {
+
+            string randomSource = nodeNames[edge.first];
+            string randomDest = nodeNames[edge.second];
+
+            // Print the statement
+            cout << "K shortest paths from node " << randomSource << " to node " << randomDest << ":" << endl;
+            findKShortest(Graph, numEdges, numNodes, 2, edge.first, edge.second, dataset_type, 2);
+        }
+    }
 }
